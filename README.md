@@ -106,6 +106,58 @@ The reconciliation flow:
 
 Reconciliation is a read-and-verify operation against the existing payment record; it must not charge the customer again.
 
+## Automatic Saga Crash Recovery
+
+The project includes recovery workflows in both Order Service and Payment Service to handle service restarts and uncertain outcomes without blindly repeating a payment operation.
+
+### Payment Service recovery
+
+Payment Service records a payment before attempting external processing and tracks its lifecycle using the statuses `PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`, and `UNKNOWN`.
+
+The recovery workflow:
+
+1. Finds stale payments that remain in an in-progress or uncertain state (`PROCESSING` or `UNKNOWN`).
+2. Locks the payment record while reconciling it, preventing concurrent recovery workers from updating the same record at the same time.
+3. Queries the payment provider through the `PaymentStatusLookup` abstraction to determine the existing transaction's outcome.
+4. Updates the stored payment status only when the lookup provides a definitive result. An inconclusive lookup leaves the payment in an uncertain state for a later attempt.
+
+**Recovery does not submit another charge.** It performs a status lookup for the existing payment. The current `MockPaymentStatusLookup` is a development/test implementation; it is not a real payment-provider integration and must not be used to make production payment decisions.
+
+### Order Service recovery
+
+Order Service periodically searches for old orders that are still `PENDING` and reconciles each order against the existing payment records returned by Payment Service.
+
+The recovery workflow:
+
+1. Selects up to 100 oldest `PENDING` orders whose `createdAt` timestamp is older than the configured stale threshold.
+2. Calls `GET /api/payments/order/{orderId}` to inspect payments already associated with the order.
+3. Confirms the order only when exactly one successful payment matches the order ID, order total, and `INR` currency.
+4. Leaves the order `PENDING` when no matching successful payment exists, the payment is still pending/processing/unknown, or Payment Service cannot be reached.
+5. Flags multiple matching successful payments for manual investigation rather than choosing one automatically.
+
+The recovery path is read-only with respect to payment creation: it never calls `POST /api/payments` and never initiates another charge. Order updates use optimistic locking (`@Version`) so concurrent changes are detected rather than silently overwritten. A failure while processing one order is logged and does not prevent the remaining candidates from being attempted during that recovery cycle.
+
+### Scheduler configuration and production safety
+
+Both recovery schedulers are controlled by application properties and are disabled by default in the current configuration. In Order Service:
+
+```properties
+order.recovery.enabled=false
+order.recovery.stale-threshold-minutes=5
+order.recovery.fixed-delay-ms=60000
+```
+
+The stale threshold and polling delay are configurable. Keep automatic recovery disabled until the payment-provider status lookup is connected to a real provider and validated in a controlled environment. In particular, do not enable Payment Service recovery with the mock lookup implementation in production. The manual Order Service reconciliation endpoint remains available for checking an existing pending order; it does not create a payment.
+
+### Tests
+
+The recovery implementation is covered by unit and database integration tests, including stale-record selection, status reconciliation, concurrent-safe payment updates, uncertain outcomes, unavailable services, duplicate successful payments, and the guarantee that order reconciliation does not submit a second payment request.
+
+Latest recorded test results for this milestone:
+
+- Order Service: 37 tests passed; 0 failures, 0 errors, 0 skipped.
+- Payment Service: 32 tests passed; 0 failures, 0 errors, 0 skipped.
+
 ### Verified integration scenario
 
 The project was tested with the following existing records:
