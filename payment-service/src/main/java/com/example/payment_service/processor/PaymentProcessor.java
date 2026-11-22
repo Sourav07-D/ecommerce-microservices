@@ -4,5 +4,5 @@ import com.example.payment_service.entity.Payment;
 
 public interface PaymentProcessor {
 
-    boolean processPayment(Payment payment);
+    PaymentProcessingResult processPayment(Payment payment);
 }

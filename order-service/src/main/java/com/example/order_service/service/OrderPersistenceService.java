@@ -34,11 +34,24 @@ public class OrderPersistenceService {
     }
 
     @Transactional
-    public void updateOrderStatus(Long orderId, String status) {
+    public boolean updateOrderStatus(Long orderId, String status) {
 
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
+        if (!"PENDING".equalsIgnoreCase(order.getStatus())) {
+            return false;
+        }
+
+        if (!"CONFIRMED".equalsIgnoreCase(status)
+                && !"CANCELLED".equalsIgnoreCase(status)) {
+            throw new IllegalArgumentException(
+                    "Invalid order status transition: " + status
+            );
+        }
+
         order.setStatus(status);
+
+        return true;
     }
 }

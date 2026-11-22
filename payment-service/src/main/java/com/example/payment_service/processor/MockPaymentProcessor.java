@@ -7,14 +7,21 @@ import org.springframework.stereotype.Component;
 public class MockPaymentProcessor implements PaymentProcessor {
 
     @Override
-    public boolean processPayment(Payment payment) {
+    public PaymentProcessingResult processPayment(Payment payment) {
 
-        // Simulate a failed transaction when payment method is FAIL
-        if ("FAIL".equalsIgnoreCase(payment.getPaymentMethod())) {
-            return false;
+        String paymentMethod = payment.getPaymentMethod();
+
+        // Simulate a definite payment failure.
+        if ("FAIL".equalsIgnoreCase(paymentMethod)) {
+            return PaymentProcessingResult.FAILED;
         }
 
-        // Simulate successful payment processing
-        return true;
+        // Simulate an uncertain payment outcome.
+        if ("UNKNOWN".equalsIgnoreCase(paymentMethod)) {
+            return PaymentProcessingResult.UNKNOWN;
+        }
+
+        // Simulate a successful payment.
+        return PaymentProcessingResult.SUCCESS;
     }
 }

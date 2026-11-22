@@ -1,4 +1,5 @@
-package com.example.order_service.service;
+
+        package com.example.order_service.service;
 
 import com.example.order_service.client.PaymentClient;
 import com.example.order_service.client.PaymentRequestDTO;
@@ -130,14 +131,8 @@ public class OrderService {
                 finalStatus
         );
 
-        return new OrderResponseDTO(
-                savedOrder.getId(),
-                savedOrder.getCustomerId(),
-                finalStatus,
-                savedOrder.getCreatedAt(),
-                responseItems,
-                totalAmount
-        );
+        // Return the actual persisted order status
+        return getOrderById(savedOrder.getId());
     }
 
     /*
@@ -186,15 +181,8 @@ public class OrderService {
         // Step 4: Confirm the order only after successful verification
         orderPersistenceService.updateOrderStatus(orderId, "CONFIRMED");
 
-        // Step 5: Return the reconciled order
-        return new OrderResponseDTO(
-                order.getId(),
-                order.getCustomerId(),
-                "CONFIRMED",
-                order.getCreatedAt(),
-                order.getItems(),
-                order.getTotalAmount()
-        );
+        // Step 5: Return the actual persisted order status
+        return getOrderById(orderId);
     }
 
     @Transactional(readOnly = true)

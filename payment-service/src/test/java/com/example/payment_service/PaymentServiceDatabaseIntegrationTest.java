@@ -5,6 +5,7 @@ import com.example.payment_service.dto.PaymentResponseDTO;
 import com.example.payment_service.entity.Payment;
 import com.example.payment_service.entity.PaymentStatus;
 import com.example.payment_service.exception.IdempotencyKeyConflictException;
+import com.example.payment_service.processor.PaymentProcessingResult;
 import com.example.payment_service.processor.PaymentProcessor;
 import com.example.payment_service.service.PaymentService;
 
@@ -47,7 +48,7 @@ class PaymentServiceDatabaseIntegrationTest {
     @BeforeEach
     void configurePaymentProcessor() {
         when(paymentProcessor.processPayment(any(Payment.class)))
-                .thenReturn(true);
+                .thenReturn(PaymentProcessingResult.SUCCESS);
     }
 
     @Test
@@ -219,7 +220,7 @@ class PaymentServiceDatabaseIntegrationTest {
                 );
             }
 
-            return true;
+            return PaymentProcessingResult.SUCCESS;
 
         }).when(paymentProcessor).processPayment(any(Payment.class));
 
@@ -245,9 +246,9 @@ class PaymentServiceDatabaseIntegrationTest {
                             () -> paymentService.createPayment(request)
                     ).get(10, TimeUnit.SECONDS);
 
-            // Request B must retrieve the existing PENDING payment.
+            // Request B must retrieve the existing PROCESSING payment.
             assertEquals(
-                    PaymentStatus.PENDING,
+                    PaymentStatus.PROCESSING,
                     secondResponse.getStatus()
             );
 

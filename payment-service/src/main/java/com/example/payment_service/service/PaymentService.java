@@ -6,6 +6,7 @@ import com.example.payment_service.entity.Payment;
 import com.example.payment_service.entity.PaymentStatus;
 import com.example.payment_service.exception.IdempotencyKeyConflictException;
 import com.example.payment_service.exception.PaymentNotFoundException;
+import com.example.payment_service.processor.PaymentProcessingResult;
 import com.example.payment_service.processor.PaymentProcessor;
 import com.example.payment_service.repository.PaymentRepository;
 
@@ -45,7 +46,7 @@ public class PaymentService {
             return mapToResponse(existingPayment.get());
         }
 
-        // Reserve the idempotency key before processing the payment.
+        // Step 1: Reserve the idempotency key before processing.
         Payment payment = new Payment();
 
         payment.setOrderId(request.getOrderId());
@@ -59,8 +60,7 @@ public class PaymentService {
 
         try {
 
-            // Flush ensures the unique-key constraint is checked here.
-            // No payment processing happens before this reservation succeeds.
+            // Persist the reservation and enforce the unique-key constraint.
             savedPayment = paymentRepository.saveAndFlush(payment);
 
         } catch (DataIntegrityViolationException exception) {
@@ -71,27 +71,64 @@ public class PaymentService {
                             .findByIdempotencyKey(request.getIdempotencyKey())
                             .orElseThrow(() -> exception);
 
-            validateIdempotencyRequest(existingPaymentAfterConflict, request);
+            validateIdempotencyRequest(
+                    existingPaymentAfterConflict,
+                    request
+            );
 
             return mapToResponse(existingPaymentAfterConflict);
         }
 
-        // Process only after successfully reserving the idempotency key.
-        boolean successful = paymentProcessor.processPayment(savedPayment);
+        // Step 2: Persist PROCESSING before calling the external processor.
+        savedPayment.setStatus(PaymentStatus.PROCESSING);
 
-        if (successful) {
+        savedPayment = paymentRepository.saveAndFlush(savedPayment);
 
-            savedPayment.setStatus(PaymentStatus.SUCCESS);
+        // Step 3: Process the payment.
+        PaymentProcessingResult processingResult;
 
-            savedPayment.setTransactionReference(
-                    "TXN-" + UUID.randomUUID()
-            );
+        try {
 
-        } else {
+            processingResult = paymentProcessor.processPayment(savedPayment);
 
-            savedPayment.setStatus(PaymentStatus.FAILED);
+            if (processingResult == null) {
+                processingResult = PaymentProcessingResult.UNKNOWN;
+            }
+
+        } catch (RuntimeException exception) {
+
+            // The processor may have completed the payment before the
+            // connection failed. We cannot safely assume it failed.
+            processingResult = PaymentProcessingResult.UNKNOWN;
         }
 
+        // Step 4: Map the processor outcome to the payment status.
+        switch (processingResult) {
+
+            case SUCCESS:
+
+                savedPayment.setStatus(PaymentStatus.SUCCESS);
+
+                savedPayment.setTransactionReference(
+                        "TXN-" + UUID.randomUUID()
+                );
+
+                break;
+
+            case FAILED:
+
+                savedPayment.setStatus(PaymentStatus.FAILED);
+
+                break;
+
+            case UNKNOWN:
+
+                savedPayment.setStatus(PaymentStatus.UNKNOWN);
+
+                break;
+        }
+
+        // Step 5: Persist the final outcome.
         Payment updatedPayment = paymentRepository.save(savedPayment);
 
         return mapToResponse(updatedPayment);

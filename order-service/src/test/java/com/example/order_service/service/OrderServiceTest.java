@@ -29,6 +29,9 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -88,6 +91,8 @@ class OrderServiceTest {
     // Helper: mock pending order persistence
     private void mockPendingOrderSave(Long orderId) {
 
+        Order[] savedOrder = new Order[1];
+
         when(orderPersistenceService.savePendingOrder(any(Order.class)))
                 .thenAnswer(invocation -> {
 
@@ -96,8 +101,31 @@ class OrderServiceTest {
                     ReflectionTestUtils.setField(order, "id", orderId);
                     order.setStatus("PENDING");
 
+                    savedOrder[0] = order;
+
                     return order;
                 });
+
+        // These operations are optional because some payment scenarios
+        // throw an exception before order retrieval or status updates.
+        lenient().when(orderRepository.findById(orderId))
+                .thenAnswer(invocation ->
+                        Optional.ofNullable(savedOrder[0])
+                );
+
+        lenient().when(orderPersistenceService.updateOrderStatus(
+                eq(orderId),
+                anyString()
+        )).thenAnswer(invocation -> {
+
+            String newStatus = invocation.getArgument(1);
+
+            if (savedOrder[0] != null) {
+                savedOrder[0].setStatus(newStatus);
+            }
+
+            return true;
+        });
     }
 
     // Helper: create payment response

@@ -6,6 +6,7 @@ import com.example.payment_service.entity.Payment;
 import com.example.payment_service.entity.PaymentStatus;
 import com.example.payment_service.exception.IdempotencyKeyConflictException;
 import com.example.payment_service.exception.PaymentNotFoundException;
+import com.example.payment_service.processor.PaymentProcessingResult;
 import com.example.payment_service.processor.PaymentProcessor;
 import com.example.payment_service.repository.PaymentRepository;
 
@@ -68,7 +69,13 @@ class PaymentServiceTest {
                 });
 
         when(paymentProcessor.processPayment(any(Payment.class)))
-                .thenReturn(true);
+                .thenAnswer(invocation -> {
+                    Payment payment = invocation.getArgument(0);
+
+                    assertEquals(PaymentStatus.PROCESSING, payment.getStatus());
+
+                    return PaymentProcessingResult.SUCCESS;
+                });
 
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -83,8 +90,11 @@ class PaymentServiceTest {
         assertEquals(PaymentStatus.SUCCESS, response.getStatus());
         assertNotNull(response.getTransactionReference());
 
-        verify(paymentRepository).saveAndFlush(any(Payment.class));
+        verify(paymentRepository, times(2))
+                .saveAndFlush(any(Payment.class));
+
         verify(paymentProcessor).processPayment(any(Payment.class));
+
         verify(paymentRepository).save(any(Payment.class));
     }
 
@@ -103,7 +113,7 @@ class PaymentServiceTest {
                 });
 
         when(paymentProcessor.processPayment(any(Payment.class)))
-                .thenReturn(false);
+                .thenReturn(PaymentProcessingResult.FAILED);
 
         when(paymentRepository.save(any(Payment.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -115,6 +125,78 @@ class PaymentServiceTest {
         assertNull(response.getTransactionReference());
 
         verify(paymentProcessor).processPayment(any(Payment.class));
+
+        verify(paymentRepository, times(2))
+                .saveAndFlush(any(Payment.class));
+
+        verify(paymentRepository).save(any(Payment.class));
+    }
+
+    @Test
+    void createPayment_shouldReturnUnknownWhenProcessorReturnsUnknown() {
+
+        when(paymentRepository.findByIdempotencyKey(
+                request.getIdempotencyKey()
+        )).thenReturn(Optional.empty());
+
+        when(paymentRepository.saveAndFlush(any(Payment.class)))
+                .thenAnswer(invocation -> {
+                    Payment payment = invocation.getArgument(0);
+                    payment.setId(3L);
+                    return payment;
+                });
+
+        when(paymentProcessor.processPayment(any(Payment.class)))
+                .thenReturn(PaymentProcessingResult.UNKNOWN);
+
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        PaymentResponseDTO response =
+                paymentService.createPayment(request);
+
+        assertEquals(PaymentStatus.UNKNOWN, response.getStatus());
+        assertNull(response.getTransactionReference());
+
+        verify(paymentProcessor).processPayment(any(Payment.class));
+
+        verify(paymentRepository, times(2))
+                .saveAndFlush(any(Payment.class));
+
+        verify(paymentRepository).save(any(Payment.class));
+    }
+
+    @Test
+    void createPayment_shouldReturnUnknownWhenProcessorThrowsException() {
+
+        when(paymentRepository.findByIdempotencyKey(
+                request.getIdempotencyKey()
+        )).thenReturn(Optional.empty());
+
+        when(paymentRepository.saveAndFlush(any(Payment.class)))
+                .thenAnswer(invocation -> {
+                    Payment payment = invocation.getArgument(0);
+                    payment.setId(4L);
+                    return payment;
+                });
+
+        when(paymentProcessor.processPayment(any(Payment.class)))
+                .thenThrow(new RuntimeException("Payment provider timeout"));
+
+        when(paymentRepository.save(any(Payment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        PaymentResponseDTO response =
+                paymentService.createPayment(request);
+
+        assertEquals(PaymentStatus.UNKNOWN, response.getStatus());
+        assertNull(response.getTransactionReference());
+
+        verify(paymentProcessor).processPayment(any(Payment.class));
+
+        verify(paymentRepository, times(2))
+                .saveAndFlush(any(Payment.class));
+
         verify(paymentRepository).save(any(Payment.class));
     }
 
